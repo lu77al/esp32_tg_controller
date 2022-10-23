@@ -13,6 +13,29 @@ void Shell::setup(commandCB_t rfCommandCB) {
   mfCommandCB = rfCommandCB;
 }
 
+void Shell::command(char *rpInput, char *rpEOI) {
+  if (!rpEOI) {
+    rpEOI = rpInput + strlen(rpInput);
+  }
+  while (rpEOI > rpInput && isspace(*(rpEOI - 1))) --rpEOI;
+  *rpEOI = ' ';
+  mdWordNum = 0;
+  char *pCh = rpInput;
+  while (pCh < rpEOI && mdWordNum < mdMaxWordNum) {
+    while (isspace(*pCh)) ++pCh;
+    maWord[mdWordNum][0] = pCh;
+    while (!isspace(*pCh)) ++pCh;
+    maWord[mdWordNum][1] = pCh;
+    ++mdWordNum;
+  }
+  *rpEOI = 0;
+  Serial.println("");
+  mbRefresh = true;
+  if (mfCommandCB && mdWordNum) {
+    mfCommandCB(mdWordNum);
+  }
+}
+
 void Shell::process() {
   mdWordNum = 0;
   if (mbRefresh) {
@@ -26,25 +49,8 @@ void Shell::process() {
     switch (dNextChar) {
       case 13:
       {
-        char *pLast = mpNext;
+        command(maBuf, mpNext);
         mpNext = maBuf;
-        while (pLast > maBuf && isspace(*(pLast - 1))) --pLast;
-        *pLast = ' ';
-        mdWordNum = 0;
-        char *pCh = maBuf;
-        while (pCh < pLast && mdWordNum < mdMaxWordNum) {
-          while (isspace(*pCh)) ++pCh;
-          maWord[mdWordNum][0] = pCh;
-          while (!isspace(*pCh)) ++pCh;
-          maWord[mdWordNum][1] = pCh;
-          ++mdWordNum;
-        }
-        *pLast = 0;
-        Serial.println("");
-        mbRefresh = true;
-        if (mfCommandCB && mdWordNum) {
-          mfCommandCB(mdWordNum);
-        }
       }
       break;
       case 127:

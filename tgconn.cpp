@@ -23,6 +23,8 @@ constexpr uint32_t mdTG_SLOW_UPDATE_MS = 15 * 1000;
 constexpr uint32_t mdTG_FAILS_TO_RECONNECT = 5;
 constexpr uint32_t mdTG_FAST_UPDATE_NUM = 10;
 
+constexpr unsigned long mdLOCAL_TIME_OFFSET = 3 * 3600;
+
 struct AccessPoint_t {
   const char* ssid;
   const char* password;
@@ -31,15 +33,15 @@ struct AccessPoint_t {
 
 #if __has_include("credentials.hpp")
 #include "credentials.hpp"
-#else 
-AccessPoint_t maAccessPoint[] = {
-  {.ssid = "MAIN_AP",   .password = nullptr,            .reserve = false},
+#else
+#define AP_LIST \
+  {.ssid = "MAIN_AP",   .password = nullptr,            .reserve = false}, \
   {.ssid = "RESERV_AP", .password = "reserv_password",  .reserve = true},
-};
-#define AP_NUM (sizeof(maAccessPoint)/sizeof(AccessPoint_t))
 #define BOT_TOKEN "BOT_TOKEN: ???????????????????????????????????"
-#define CHAT_ID   "-CHAT_ID-"
 #endif // __has_include("credentials.hpp")
+
+AccessPoint_t maAccessPoint[] = { AP_LIST };
+#define AP_NUM (sizeof(maAccessPoint)/sizeof(AccessPoint_t))
 
 const char *aWiFiStatus[] = {
     "IDLE_STATUS",
@@ -58,7 +60,7 @@ X509List cert(TELEGRAM_CERTIFICATE_ROOT);
 #endif
 
 WiFiClientSecure client;
-UniversalTelegramBot bot(BOT_TOKEN, client);
+UniversalTelegramBot utTgBot(BOT_TOKEN, client);
 
 wl_status_t meWiFiStatus = WL_NO_SHIELD;
 unsigned long mdPowerUpTime;
@@ -67,13 +69,13 @@ unsigned long mdSwitchNetworkTime;
 unsigned mdApIdx = AP_NUM - 1;
 unsigned mdNoResponceCnt = 0;
 unsigned mdFastUpdateCnt = 0;
-
 } // namespace
 
 TgConn::TgConn() {
 }
 
-void TgConn::setup(eventCB_t rfEventCB) {
+void TgConn::setup(inputMessageCB_t rfInputMessageCB) {
+  mfInputMessageCB = rfInputMessageCB;
   mdNextActionTime = mdPowerUpTime = millis() + mdINITIAL_DELAY_MS;
   meWiFiStatus = WL_NO_SHIELD;
   #if defined(ESP8266)
@@ -121,19 +123,28 @@ void TgConn::process() {
     return;
   }
   // Check telegram income messages
-  int dMsgAvailNum = bot.getUpdates(bot.last_message_received + 1);
+  int dMsgAvailNum = utTgBot.getUpdates(utTgBot.last_message_received + 1);
   gShell.clear();
-  Serial.printf("Check tg in (fast=%d fail=%d)" NL, mdFastUpdateCnt, mdNoResponceCnt);
+  Serial.printf("Check tg (fast=%d fail=%d)" NL, mdFastUpdateCnt, mdNoResponceCnt);
   if (dMsgAvailNum > 0) { // Process messages, swithch to frequent update
     mdFastUpdateCnt = mdTG_FAST_UPDATE_NUM;
     mdNoResponceCnt = 0;
     for (int i=0; i<dMsgAvailNum; i++) {
-      String tId = String(bot.messages[i].chat_id);
-      String tText = String(bot.messages[i].text);
-      String tName = String(bot.messages[i].from_name);
-      Serial.printf("%s(%s)> %s" NL, tName.c_str(), tId.c_str(), tText.c_str());
+      auto pMsg = &(utTgBot.messages[i]);
+      String tId = String(pMsg->chat_id);
+      String tText = String(pMsg->text);
+      String tName = String(pMsg->from_name);
+      unsigned long dEpochTime = pMsg->date.toInt();
+      if (dEpochTime) {
+        mdEpochTimeSync = dEpochTime + mdLOCAL_TIME_OFFSET;
+        mdPowerUpTimeSync = millis() / 1000;
+      }
+      Serial.printf("%s> %s" NL, tName.c_str(), tText.c_str());
+      if (mfInputMessageCB) {
+        mfInputMessageCB(tId.c_str(), tText.c_str());
+      }
     }
-  } else if (UniversalTelegramBot::Result::Ok == bot._lastResult) { // Connection Ok, no messges 
+  } else if (UniversalTelegramBot::Result::Ok == utTgBot._lastResult) { // Connection Ok, no messges 
     mdNoResponceCnt = 0;
     if (mdFastUpdateCnt) {
       --mdFastUpdateCnt;
@@ -146,7 +157,15 @@ void TgConn::process() {
       return;
     }
   }
-  mdNextActionTime = millis() + (mdFastUpdateCnt ? mdTG_FAST_UPDATE_MS : mdTG_SLOW_UPDATE_MS); // Fast/slow update 
+  mdNextActionTime = millis() +
+    ((mdFastUpdateCnt || !maAccessPoint[mdApIdx].reserve) ?
+      mdTG_FAST_UPDATE_MS :
+      mdTG_SLOW_UPDATE_MS); // Fast/slow update 
+}
+
+unsigned TgConn::getDayTime() {
+  const unsigned long dEpochTime = mdEpochTimeSync + (millis() / 1000) - mdPowerUpTimeSync;
+  return dEpochTime % (24 * 3600);
 }
 
 void TgConn::printWiFiStatus(int rdStatusIdx) {
@@ -174,4 +193,10 @@ void TgConn::disconnect() {
   Serial.println("Disconnecting...");
   WiFi.disconnect(true, true);
   mdNextActionTime = millis() + mdWIFI_DISCONNECT_ATTEMPT_MS;
+}
+
+void TgConn::sendMessage(const char *rpID, const char *rpMessage) {
+  if (WL_CONNECTED == meWiFiStatus) {
+    utTgBot.sendMessage(rpID, rpMessage);
+  }
 }

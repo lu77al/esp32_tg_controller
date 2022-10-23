@@ -11,6 +11,7 @@ public:
   Shell();
   void setup(commandCB_t rfCommandCB);
   void process();
+  void command(char *rpInput, char *rpEOI = nullptr);
   const char *getInput();
   const char *getWord(unsigned rdIdx);
   void clear();

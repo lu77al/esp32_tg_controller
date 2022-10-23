@@ -5,20 +5,19 @@
 
 class TgConn {
 public:
-  using eventCB_t = void(*)(const char *pEvent);
+  using inputMessageCB_t = void(*)(const char *rpID, const char *rpMessage);
   TgConn();
-  void setup(eventCB_t rfEventCB);
+  void setup(inputMessageCB_t rfEventCB);
   void process();
   void reportStatus();
-  // void connect_wifi();
-  // void connect_wifi(const char *raSSID, const char *raPassword);
   void disconnect();
-  // void check_messages();
+  void sendMessage(const char *rpID, const char *rpMessage);
+  unsigned getDayTime();
 private:
   void printWiFiStatus(int rdStatusIdx);
-
-//   bool mbWiFiConnected;
-//   unsigned long mdNextTime;
+  inputMessageCB_t mfInputMessageCB = nullptr;
+  unsigned long mdPowerUpTimeSync = 0;
+  unsigned long mdEpochTimeSync = 0;
 };
 
 extern TgConn gTgConn;
